@@ -612,7 +612,7 @@ game:GetService("Players").LocalPlayer.OnTeleport:Connect(function(State)
     if State == Enum.TeleportState.Started and Config.AutoReconnect then
         local script = [[
             wait(5)
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/your-repo/main.lua"))()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Avka24/bloxfruit/refs/heads/main/auto%20sea.lua"))()
         ]]
         queue_on_teleport(script)
     end
