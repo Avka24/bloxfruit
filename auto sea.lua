@@ -1,634 +1,595 @@
 --[[
-    Blox Fruits Auto Farm Laut - Complete Implementation
-    Fully compatible with Xeno Executor
-    Version 2.0
+    Auto Farm Laut Blox Fruits v2.0
+    Kompatibel dengan Ronix PC
+    Fitur Lengkap dengan Performa Optimal
 ]]
 
--- Load libraries
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+-- Load required libraries
+local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/shlexware/Rayfield/main/source'))()
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
-local RunService = game:GetService("RunService")
 
 -- Player references
-local Player = Players.LocalPlayer
-local Character = Player.Character or Player.CharacterAdded:Wait()
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 local Humanoid = Character:WaitForChild("Humanoid")
 
 -- Configuration
-local Config = {
-    AutoBoat = true,
-    AutoSail = true,
-    TargetIsland = "Random",
-    AutoFarmSeaBeasts = true,
-    AutoFarmPirates = true,
-    AutoCollectChests = true,
-    AutoBountyHunt = false,
-    BountyThreshold = 500000,
-    AutoFruitFinder = true,
-    AutoFruitGrab = true,
-    AutoServerHop = true,
-    HopDelay = 300,
-    LowPlayerServer = true,
-    MaxPlayers = 8,
-    AutoDodge = true,
-    AutoReconnect = true,
-    CombatMode = "Melee",
-    AttackRange = 20,
-    PriorityTarget = "SeaBeast",
-    BoatSpeed = 50,
-    FruitScanRange = 1000,
-    ChestScanRange = 500,
-    EnemyScanRange = 300
+local config = {
+    autoBoat = true,
+    autoSail = true,
+    autoFarm = true,
+    autoSeaBeast = true,
+    autoChest = true,
+    autoBounty = false,
+    autoFruit = true,
+    serverHop = true,
+    lowPlayerServer = true,
+    maxPlayersForHop = 8,
+    hopDelay = 60,
+    attackRange = 50,
+    seaBeastPriority = true,
+    aimOffset = Vector3.new(0, 3, 0),
+    fruitScanRadius = 500,
+    chestScanRadius = 300,
+    playerScanRadius = 200,
+    dodgeEnabled = true,
+    dodgeDistance = 15,
+    dodgeCooldown = 1
 }
 
--- Cache variables
-local CurrentBoat = nil
-local CurrentTarget = nil
-local LastServerHop = tick()
-local Islands = {
-    ["Jungle"] = Vector3.new(-1246, 15, 757),
-    ["Pirate Village"] = Vector3.new(-1161, 15, 3889),
-    ["Desert"] = Vector3.new(954, 7, 4134),
-    ["Snow"] = Vector3.new(2324, 25, -716),
-    ["Marine"] = Vector3.new(-3914, 19, 302),
-    ["Sky"] = Vector3.new(-4867, 554, -2503)
-}
+-- State variables
+local lastDodgeTime = 0
+local currentBoat = nil
+local currentTarget = nil
+local currentIsland = nil
+local fruitWaypoints = {}
+local chestWaypoints = {}
+local serverHopAttempts = 0
+local lastServerHopTime = 0
 
 -- UI Setup
 local Window = Rayfield:CreateWindow({
-    Name = "Blox Fruits Auto Farm Laut",
-    LoadingTitle = "Loading Script...",
-    LoadingSubtitle = "by Xeno Script Hub",
+    Name = "Auto Farm Laut Blox Fruits",
+    LoadingTitle = "Memuat Auto Farm...",
+    LoadingSubtitle = "by Professional Script Developer",
     ConfigurationSaving = {
         Enabled = true,
-        FolderName = "BloxFarm",
-        FileName = "SeaConfig"
+        FolderName = "BloxFarmConfig",
+        FileName = "LautConfig.json"
     },
     Discord = {
         Enabled = true,
-        Invite = "noinvitelink",
+        Invite = "invitelink",
         RememberJoins = true
     }
 })
 
 -- Main Tabs
-local FarmTab = Window:CreateTab("Auto Farm")
-local CombatTab = Window:CreateTab("Combat")
-local TravelTab = Window:CreateTab("Travel")
-local MiscTab = Window:CreateTab("Misc")
-local SettingsTab = Window:CreateTab("Settings")
+local MainTab = Window:CreateTab("Main", 4483362458)
+local FarmingTab = Window:CreateTab("Farming", 4483362458)
+local PlayerTab = Window:CreateTab("Player", 4483362458)
+local TeleportTab = Window:CreateTab("Teleport", 4483362458)
+local SettingsTab = Window:CreateTab("Settings", 4483362458)
 
--- UI Elements
-FarmTab:CreateToggle({
-    Name = "Auto Farm Sea Beasts",
-    CurrentValue = Config.AutoFarmSeaBeasts,
-    Flag = "AutoFarmSeaBeasts",
-    Callback = function(Value) Config.AutoFarmSeaBeasts = Value end
+-- Main Section
+MainTab:CreateToggle({
+    Name = "Aktifkan Auto Farm",
+    CurrentValue = true,
+    Flag = "AutoFarmEnabled",
+    Callback = function(Value)
+        config.autoFarm = Value
+    end,
 })
 
-FarmTab:CreateToggle({
-    Name = "Auto Farm Pirates",
-    CurrentValue = Config.AutoFarmPirates,
-    Flag = "AutoFarmPirates",
-    Callback = function(Value) Config.AutoFarmPirates = Value end
+MainTab:CreateToggle({
+    Name = "Auto Boat",
+    CurrentValue = true,
+    Flag = "AutoBoatEnabled",
+    Callback = function(Value)
+        config.autoBoat = Value
+    end,
 })
 
-FarmTab:CreateToggle({
-    Name = "Auto Collect Chests",
-    CurrentValue = Config.AutoCollectChests,
-    Flag = "AutoCollectChests",
-    Callback = function(Value) Config.AutoCollectChests = Value end
-})
-
-CombatTab:CreateDropdown({
-    Name = "Combat Mode",
-    Options = {"Melee", "Sword", "Gun", "Fruit"},
-    CurrentOption = Config.CombatMode,
-    Flag = "CombatMode",
-    Callback = function(Option) Config.CombatMode = Option end
-})
-
-CombatTab:CreateSlider({
-    Name = "Attack Range",
-    Range = {10, 50},
-    Increment = 1,
-    Suffix = "Studs",
-    CurrentValue = Config.AttackRange,
-    Flag = "AttackRange",
-    Callback = function(Value) Config.AttackRange = Value end
-})
-
-CombatTab:CreateToggle({
-    Name = "Auto Dodge",
-    CurrentValue = Config.AutoDodge,
-    Flag = "AutoDodge",
-    Callback = function(Value) Config.AutoDodge = Value end
-})
-
-CombatTab:CreateDropdown({
-    Name = "Priority Target",
-    Options = {"SeaBeast", "Pirate", "Player", "Chest", "Fruit"},
-    CurrentOption = Config.PriorityTarget,
-    Flag = "PriorityTarget",
-    Callback = function(Option) Config.PriorityTarget = Option end
-})
-
-TravelTab:CreateToggle({
-    Name = "Auto Buy & Ride Boat",
-    CurrentValue = Config.AutoBoat,
-    Flag = "AutoBoat",
-    Callback = function(Value) Config.AutoBoat = Value end
-})
-
-TravelTab:CreateToggle({
+MainTab:CreateToggle({
     Name = "Auto Sail",
-    CurrentValue = Config.AutoSail,
-    Flag = "AutoSail",
-    Callback = function(Value) Config.AutoSail = Value end
+    CurrentValue = true,
+    Flag = "AutoSailEnabled",
+    Callback = function(Value)
+        config.autoSail = Value
+    end,
 })
 
-TravelTab:CreateDropdown({
-    Name = "Target Island",
-    Options = {"Random", "Jungle", "Pirate Village", "Desert", "Snow", "Marine", "Sky"},
-    CurrentOption = Config.TargetIsland,
-    Flag = "TargetIsland",
-    Callback = function(Option) Config.TargetIsland = Option end
+-- Farming Section
+FarmingTab:CreateToggle({
+    Name = "Auto Kill Sea Beast",
+    CurrentValue = true,
+    Flag = "AutoSeaBeastEnabled",
+    Callback = function(Value)
+        config.autoSeaBeast = Value
+    end,
 })
 
-TravelTab:CreateSlider({
-    Name = "Boat Speed",
-    Range = {20, 100},
-    Increment = 5,
-    Suffix = "Speed",
-    CurrentValue = Config.BoatSpeed,
-    Flag = "BoatSpeed",
-    Callback = function(Value) Config.BoatSpeed = Value end
+FarmingTab:CreateToggle({
+    Name = "Auto Collect Chest",
+    CurrentValue = true,
+    Flag = "AutoChestEnabled",
+    Callback = function(Value)
+        config.autoChest = Value
+    end,
 })
 
-MiscTab:CreateToggle({
-    Name = "Auto Bounty Hunt",
-    CurrentValue = Config.AutoBountyHunt,
-    Flag = "AutoBountyHunt",
-    Callback = function(Value) Config.AutoBountyHunt = Value end
-})
-
-MiscTab:CreateSlider({
-    Name = "Bounty Threshold",
-    Range = {100000, 5000000},
-    Increment = 10000,
-    Suffix = "Bounty",
-    CurrentValue = Config.BountyThreshold,
-    Flag = "BountyThreshold",
-    Callback = function(Value) Config.BountyThreshold = Value end
-})
-
-MiscTab:CreateToggle({
+FarmingTab:CreateToggle({
     Name = "Auto Fruit Finder",
-    CurrentValue = Config.AutoFruitFinder,
-    Flag = "AutoFruitFinder",
-    Callback = function(Value) Config.AutoFruitFinder = Value end
+    CurrentValue = true,
+    Flag = "AutoFruitEnabled",
+    Callback = function(Value)
+        config.autoFruit = Value
+    end,
 })
 
-MiscTab:CreateToggle({
-    Name = "Auto Fruit Grab",
-    CurrentValue = Config.AutoFruitGrab,
-    Flag = "AutoFruitGrab",
-    Callback = function(Value) Config.AutoFruitGrab = Value end
+-- Player Section
+PlayerTab:CreateToggle({
+    Name = "Auto Bounty Hunt",
+    CurrentValue = false,
+    Flag = "AutoBountyEnabled",
+    Callback = function(Value)
+        config.autoBounty = Value
+    end,
 })
 
-MiscTab:CreateToggle({
+PlayerTab:CreateToggle({
+    Name = "Auto Dodge",
+    CurrentValue = true,
+    Flag = "AutoDodgeEnabled",
+    Callback = function(Value)
+        config.dodgeEnabled = Value
+    end,
+})
+
+-- Server Section
+SettingsTab:CreateToggle({
     Name = "Auto Server Hop",
-    CurrentValue = Config.AutoServerHop,
-    Flag = "AutoServerHop",
-    Callback = function(Value) Config.AutoServerHop = Value end
+    CurrentValue = true,
+    Flag = "AutoHopEnabled",
+    Callback = function(Value)
+        config.serverHop = Value
+    end,
 })
 
-MiscTab:CreateToggle({
-    Name = "Find Low Player Server",
-    CurrentValue = Config.LowPlayerServer,
-    Flag = "LowPlayerServer",
-    Callback = function(Value) Config.LowPlayerServer = Value end
-})
-
-MiscTab:CreateToggle({
-    Name = "Auto Reconnect",
-    CurrentValue = Config.AutoReconnect,
-    Flag = "AutoReconnect",
-    Callback = function(Value) Config.AutoReconnect = Value end
+SettingsTab:CreateToggle({
+    Name = "Cari Server Sepi",
+    CurrentValue = true,
+    Flag = "LowPlayerServerEnabled",
+    Callback = function(Value)
+        config.lowPlayerServer = Value
+    end,
 })
 
 SettingsTab:CreateSlider({
-    Name = "Fruit Scan Range",
-    Range = {500, 2000},
-    Increment = 50,
-    Suffix = "Studs",
-    CurrentValue = Config.FruitScanRange,
-    Flag = "FruitScanRange",
-    Callback = function(Value) Config.FruitScanRange = Value end
+    Name = "Max Players untuk Hop",
+    Range = {1, 20},
+    Increment = 1,
+    Suffix = "players",
+    CurrentValue = 8,
+    Flag = "MaxPlayersForHop",
+    Callback = function(Value)
+        config.maxPlayersForHop = Value
+    end,
 })
 
-SettingsTab:CreateSlider({
-    Name = "Chest Scan Range",
-    Range = {200, 1000},
-    Increment = 50,
-    Suffix = "Studs",
-    CurrentValue = Config.ChestScanRange,
-    Flag = "ChestScanRange",
-    Callback = function(Value) Config.ChestScanRange = Value end
-})
+-- Utility functions
+function getNearestIsland()
+    local islands = {}
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj.Name:find("Island") and obj:FindFirstChild("HumanoidRootPart") then
+            table.insert(islands, obj)
+        end
+    end
+    
+    local nearestIsland = nil
+    local shortestDistance = math.huge
+    
+    for _, island in pairs(islands) do
+        local distance = (HumanoidRootPart.Position - island.HumanoidRootPart.Position).Magnitude
+        if distance < shortestDistance then
+            shortestDistance = distance
+            nearestIsland = island
+        end
+    end
+    
+    return nearestIsland
+end
 
-SettingsTab:CreateSlider({
-    Name = "Enemy Scan Range",
-    Range = {100, 500},
-    Increment = 25,
-    Suffix = "Studs",
-    CurrentValue = Config.EnemyScanRange,
-    Flag = "EnemyScanRange",
-    Callback = function(Value) Config.EnemyScanRange = Value end
-})
-
--- Utility Functions
-function GetNearestBoat()
+function getBoat()
+    local boats = {}
+    for _, obj in pairs(Workspace.Boats:GetChildren()) do
+        if obj:FindFirstChild("VehicleSeat") then
+            table.insert(boats, obj)
+        end
+    end
+    
     local nearestBoat = nil
     local shortestDistance = math.huge
     
-    for _, boat in pairs(Workspace.Boats:GetChildren()) do
-        if boat:FindFirstChild("VehicleSeat") and boat.VehicleSeat:FindFirstChild("SeatWeld") == nil then
-            local distance = (HumanoidRootPart.Position - boat.VehicleSeat.Position).Magnitude
-            if distance < shortestDistance then
-                nearestBoat = boat
-                shortestDistance = distance
-            end
+    for _, boat in pairs(boats) do
+        local distance = (HumanoidRootPart.Position - boat.VehicleSeat.Position).Magnitude
+        if distance < shortestDistance then
+            shortestDistance = distance
+            nearestBoat = boat
         end
     end
     
     return nearestBoat
 end
 
-function BuyBoat()
+function buyBoat()
     local boatShop = Workspace:FindFirstChild("BoatShop")
     if boatShop then
-        local closestDealer = nil
-        local minDistance = math.huge
-        
-        for _, dealer in pairs(boatShop:GetChildren()) do
-            if dealer:FindFirstChild("Head") then
-                local distance = (HumanoidRootPart.Position - dealer.Head.Position).Magnitude
-                if distance < minDistance then
-                    closestDealer = dealer
-                    minDistance = distance
-                end
+        local boatModel = boatShop:FindFirstChild("BoatModel")
+        if boatModel then
+            local buyEvent = boatModel:FindFirstChild("BuyBoat")
+            if buyEvent then
+                firetouchinterest(HumanoidRootPart, buyEvent, 0)
+                firetouchinterest(HumanoidRootPart, buyEvent, 1)
+                return true
             end
-        end
-        
-        if closestDealer and minDistance < 20 then
-            fireclickdetector(closestDealer:FindFirstChildOfType("ClickDetector"))
-            task.wait(1)
-            -- Select cheapest boat
-            if Player.PlayerGui:FindFirstChild("BoatShop") then
-                local frame = Player.PlayerGui.BoatShop.Frame.MainFrame
-                for _, button in pairs(frame:GetChildren()) do
-                    if button:IsA("TextButton") and button.Name ~= "Exit" then
-                        fireclickdetector(button:FindFirstChildOfType("ClickDetector"))
-                        break
-                    end
-                end
-            end
-        else
-            -- Move to boat shop
-            Humanoid:MoveTo(boatShop:GetModelCFrame().Position)
         end
     end
+    return false
 end
 
-function BoardBoat(boat)
+function boardBoat(boat)
     if boat and boat:FindFirstChild("VehicleSeat") then
         local seat = boat.VehicleSeat
-        if seat:FindFirstChild("SeatWeld") == nil then
+        local distance = (HumanoidRootPart.Position - seat.Position).Magnitude
+        
+        if distance < 15 then
             Humanoid.Sit = true
-            HumanoidRootPart.CFrame = seat.CFrame * CFrame.new(0, -1, 0)
-            task.wait(0.5)
-            firetouchinterest(HumanoidRootPart, seat, 0)
-            firetouchinterest(HumanoidRootPart, seat, 1)
-            CurrentBoat = boat
+            wait(0.1)
+            VirtualInputManager:SendKeyEvent(true, "E", false, game)
+            wait(0.1)
+            VirtualInputManager:SendKeyEvent(false, "E", false, game)
+            return true
+        else
+            -- Move to boat
+            Humanoid:MoveTo(seat.Position)
         end
     end
+    return false
 end
 
-function GetRandomIsland()
-    local keys = {}
-    for k in pairs(Islands) do table.insert(keys, k) end
-    return keys[math.random(1, #keys)]
-end
-
-function GetIslandPosition(islandName)
-    if islandName == "Random" then
-        islandName = GetRandomIsland()
-    end
-    return Islands[islandName]
-end
-
-function GetNearestEnemy()
-    local enemies = {}
-    local priorityTargets = {}
+function getClosestEnemy()
+    local closestEnemy = nil
+    local shortestDistance = math.huge
     
-    -- Sea Beasts
-    if Config.AutoFarmSeaBeasts then
-        for _, beast in pairs(Workspace:GetChildren()) do
-            if beast.Name == "SeaBeast" and beast:FindFirstChild("Humanoid") and beast.Humanoid.Health > 0 then
-                local distance = (HumanoidRootPart.Position - beast:FindFirstChild("HumanoidRootPart").Position).Magnitude
-                if distance < Config.EnemyScanRange then
-                    table.insert(enemies, {Type = "SeaBeast", Object = beast, Distance = distance})
-                    if Config.PriorityTarget == "SeaBeast" then
-                        table.insert(priorityTargets, {Type = "SeaBeast", Object = beast, Distance = distance})
-                    end
+    -- Check for Sea Beasts
+    if config.autoSeaBeast then
+        for _, enemy in pairs(Workspace.SeaBeasts:GetChildren()) do
+            if enemy:FindFirstChild("HumanoidRootPart") and enemy:FindFirstChild("Humanoid") and enemy.Humanoid.Health > 0 then
+                local distance = (HumanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude
+                if distance < config.attackRange and distance < shortestDistance then
+                    shortestDistance = distance
+                    closestEnemy = enemy
                 end
             end
         end
     end
     
-    -- Pirates
-    if Config.AutoFarmPirates then
-        for _, npc in pairs(Workspace.NPCs:GetChildren()) do
-            if (npc.Name:find("Pirate") or npc.Name:find("Bandit")) and npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
-                local distance = (HumanoidRootPart.Position - npc:FindFirstChild("HumanoidRootPart").Position).Magnitude
-                if distance < Config.EnemyScanRange then
-                    table.insert(enemies, {Type = "Pirate", Object = npc, Distance = distance})
-                    if Config.PriorityTarget == "Pirate" then
-                        table.insert(priorityTargets, {Type = "Pirate", Object = npc, Distance = distance})
-                    end
-                end
+    -- Check for NPCs
+    for _, npc in pairs(Workspace.NPCs:GetChildren()) do
+        if npc:FindFirstChild("HumanoidRootPart") and npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
+            local distance = (HumanoidRootPart.Position - npc.HumanoidRootPart.Position).Magnitude
+            if distance < config.attackRange and distance < shortestDistance then
+                shortestDistance = distance
+                closestEnemy = npc
             end
         end
     end
     
-    -- Players (for bounty)
-    if Config.AutoBountyHunt then
+    -- Check for Players if bounty hunting is enabled
+    if config.autoBounty then
         for _, player in pairs(Players:GetPlayers()) do
-            if player ~= Player and player:FindFirstChild("leaderstats") then
-                local bounty = player.leaderstats:FindFirstChild("Bounty") or player.leaderstats:FindFirstChild("฿ounty")
-                if bounty and tonumber(bounty.Value) >= Config.BountyThreshold then
-                    local char = player.Character
-                    if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
-                        local distance = (HumanoidRootPart.Position - char:FindFirstChild("HumanoidRootPart").Position).Magnitude
-                        if distance < Config.EnemyScanRange then
-                            table.insert(enemies, {Type = "Player", Object = char, Distance = distance})
-                            if Config.PriorityTarget == "Player" then
-                                table.insert(priorityTargets, {Type = "Player", Object = char, Distance = distance})
-                            end
-                        end
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+                local bounty = player:GetAttribute("Bounty") or 0
+                if bounty >= 100000 then -- Only target high bounty players
+                    local distance = (HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
+                    if distance < config.playerScanRadius and distance < shortestDistance then
+                        shortestDistance = distance
+                        closestEnemy = player.Character
                     end
                 end
             end
         end
     end
     
-    -- Chests
-    if Config.AutoCollectChests then
-        for _, chest in pairs(Workspace:GetChildren()) do
-            if chest.Name:find("Chest") and chest:FindFirstChild("Chest") then
-                local distance = (HumanoidRootPart.Position - chest.Position).Magnitude
-                if distance < Config.ChestScanRange then
-                    table.insert(enemies, {Type = "Chest", Object = chest, Distance = distance})
-                    if Config.PriorityTarget == "Chest" then
-                        table.insert(priorityTargets, {Type = "Chest", Object = chest, Distance = distance})
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Fruits
-    if Config.AutoFruitFinder and Config.AutoFruitGrab then
-        for _, fruit in pairs(Workspace:GetChildren()) do
-            if fruit:FindFirstChild("Handle") and fruit.Name:find("Fruit") then
-                local distance = (HumanoidRootPart.Position - fruit.Handle.Position).Magnitude
-                if distance < Config.FruitScanRange then
-                    table.insert(enemies, {Type = "Fruit", Object = fruit, Distance = distance})
-                    if Config.PriorityTarget == "Fruit" then
-                        table.insert(priorityTargets, {Type = "Fruit", Object = fruit, Distance = distance})
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Return priority target if exists, otherwise closest enemy
-    if #priorityTargets > 0 then
-        table.sort(priorityTargets, function(a, b) return a.Distance < b.Distance end)
-        return priorityTargets[1].Object, priorityTargets[1].Type
-    elseif #enemies > 0 then
-        table.sort(enemies, function(a, b) return a.Distance < b.Distance end)
-        return enemies[1].Object, enemies[1].Type
-    end
-    
-    return nil
+    return closestEnemy
 end
 
-function AttackTarget(target, targetType)
-    if not target then return end
+function attackEnemy(enemy)
+    if not enemy or not enemy:FindFirstChild("HumanoidRootPart") then return end
     
-    local targetPos = target:FindFirstChild("HumanoidRootPart") and target.HumanoidRootPart.Position or target.Position
+    -- Face the enemy
+    local targetPosition = enemy.HumanoidRootPart.Position + config.aimOffset
+    HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, Vector3.new(targetPosition.X, HumanoidRootPart.Position.Y, targetPosition.Z))
     
-    -- Move to target
-    if (HumanoidRootPart.Position - targetPos).Magnitude > Config.AttackRange then
-        Humanoid:MoveTo(targetPos)
+    -- Attack logic
+    local combatFramework = require(ReplicatedStorage:WaitForChild("CombatFramework"))
+    local combatModule = debug.getupvalue(combatFramework, 2)
+    local cooldown = combatModule.activeController.timeToNextAttack
+    
+    if cooldown <= 0 then
+        combatModule.activeController:attack()
+    end
+    
+    -- Use skills if available
+    local skills = {
+        "Z",
+        "X",
+        "C",
+        "V",
+        "F"
+    }
+    
+    for _, skill in pairs(skills) do
+        VirtualInputManager:SendKeyEvent(true, skill, false, game)
+        wait(0.1)
+        VirtualInputManager:SendKeyEvent(false, skill, false, game)
+    end
+end
+
+function dodgeAttack()
+    if os.clock() - lastDodgeTime < config.dodgeCooldown then return end
+    
+    -- Check for incoming projectiles
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj.Name:find("Projectile") or obj.Name:find("Bullet") then
+            local distance = (HumanoidRootPart.Position - obj.Position).Magnitude
+            if distance < 20 then
+                -- Calculate dodge direction
+                local dodgeDirection = (HumanoidRootPart.Position - obj.Position).Unit * config.dodgeDistance
+                local newPosition = HumanoidRootPart.Position + dodgeDirection
+                
+                -- Teleport to dodge
+                HumanoidRootPart.CFrame = CFrame.new(newPosition)
+                lastDodgeTime = os.clock()
+                break
+            end
+        end
+    end
+end
+
+function scanForFruits()
+    fruitWaypoints = {}
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj.Name:find("Fruit") and obj:FindFirstChild("Handle") then
+            local distance = (HumanoidRootPart.Position - obj.Handle.Position).Magnitude
+            if distance < config.fruitScanRadius then
+                table.insert(fruitWaypoints, obj.Handle)
+            end
+        end
+    end
+end
+
+function scanForChests()
+    chestWaypoints = {}
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj.Name:find("Chest") and obj:FindFirstChild("Chest") then
+            local distance = (HumanoidRootPart.Position - obj.Chest.Position).Magnitude
+            if distance < config.chestScanRadius then
+                table.insert(chestWaypoints, obj.Chest)
+            end
+        end
+    end
+end
+
+function collectNearestFruit()
+    if #fruitWaypoints == 0 then return false end
+    
+    local nearestFruit = nil
+    local shortestDistance = math.huge
+    
+    for _, fruit in pairs(fruitWaypoints) do
+        local distance = (HumanoidRootPart.Position - fruit.Position).Magnitude
+        if distance < shortestDistance then
+            shortestDistance = distance
+            nearestFruit = fruit
+        end
+    end
+    
+    if nearestFruit then
+        Humanoid:MoveTo(nearestFruit.Position)
+        if shortestDistance < 10 then
+            firetouchinterest(HumanoidRootPart, nearestFruit, 0)
+            firetouchinterest(HumanoidRootPart, nearestFruit, 1)
+            return true
+        end
+    end
+    
+    return false
+end
+
+function collectNearestChest()
+    if #chestWaypoints == 0 then return false end
+    
+    local nearestChest = nil
+    local shortestDistance = math.huge
+    
+    for _, chest in pairs(chestWaypoints) do
+        local distance = (HumanoidRootPart.Position - chest.Position).Magnitude
+        if distance < shortestDistance then
+            shortestDistance = distance
+            nearestChest = chest
+        end
+    end
+    
+    if nearestChest then
+        Humanoid:MoveTo(nearestChest.Position)
+        if shortestDistance < 10 then
+            firetouchinterest(HumanoidRootPart, nearestChest, 0)
+            firetouchinterest(HumanoidRootPart, nearestChest, 1)
+            return true
+        end
+    end
+    
+    return false
+end
+
+function shouldServerHop()
+    if not config.serverHop then return false end
+    if os.time() - lastServerHopTime < config.hopDelay then return false end
+    
+    -- Check player count
+    if config.lowPlayerServer and #Players:GetPlayers() > config.maxPlayersForHop then
+        return true
+    end
+    
+    -- Check if no targets available
+    if config.autoSeaBeast and #Workspace.SeaBeasts:GetChildren() == 0 then
+        return true
+    end
+    
+    return false
+end
+
+function serverHop()
+    if serverHopAttempts > 3 then 
+        Rayfield:Notify({
+            Title = "Server Hop",
+            Content = "Gagal pindah server setelah 3 percobaan. Menonaktifkan auto hop.",
+            Duration = 6.5,
+            Image = 4483362458,
+            Actions = {
+                Ignore = {
+                    Name = "Oke",
+                    Callback = function()
+                        config.serverHop = false
+                    end
+                },
+            },
+        })
         return
     end
     
-    -- Face target
-    HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, Vector3.new(targetPos.X, HumanoidRootPart.Position.Y, targetPos.Z))
+    serverHopAttempts = serverHopAttempts + 1
+    lastServerHopTime = os.time()
     
-    -- Combat based on mode
-    if Config.CombatMode == "Melee" then
-        -- Melee attacks
-        VirtualInputManager:SendKeyEvent(true, "Z", false, game)
-        task.wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, "Z", false, game)
-        
-        VirtualInputManager:SendKeyEvent(true, "X", false, game)
-        task.wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, "X", false, game)
-    elseif Config.CombatMode == "Sword" then
-        -- Sword attacks
-        VirtualInputManager:SendKeyEvent(true, "C", false, game)
-        task.wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, "C", false, game)
-    elseif Config.CombatMode == "Gun" then
-        -- Gun attacks
-        VirtualInputManager:SendKeyEvent(true, "V", false, game)
-        task.wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, "V", false, game)
-    elseif Config.CombatMode == "Fruit" then
-        -- Fruit attacks
-        VirtualInputManager:SendKeyEvent(true, "F", false, game)
-        task.wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, "F", false, game)
-    end
+    Rayfield:Notify({
+        Title = "Server Hop",
+        Content = "Mencari server baru... (Percobaan "..serverHopAttempts..")",
+        Duration = 6.5,
+        Image = 4483362458,
+    })
     
-    -- Collect chest or fruit
-    if targetType == "Chest" or targetType == "Fruit" then
-        if (HumanoidRootPart.Position - targetPos).Magnitude < 10 then
-            firetouchinterest(HumanoidRootPart, target, 0)
-            firetouchinterest(HumanoidRootPart, target, 1)
-        end
-    end
-end
-
-function DodgeAttack()
-    if not Config.AutoDodge then return end
-    
-    -- Check for incoming attacks
-    for _, part in pairs(Workspace:GetPartsInPart(HumanoidRootPart, 15)) do
-        if part:FindFirstChild("creator") or part.Name:find("Hitbox") then
-            -- Perform dodge
-            Humanoid.Jump = true
-            local dodgeDir = (HumanoidRootPart.Position - part.Position).Unit * 10
-            HumanoidRootPart.Velocity = Vector3.new(dodgeDir.X, Humanoid.JumpPower, dodgeDir.Z)
-            return
-        end
-    end
-end
-
-function SailToIsland()
-    if not Config.AutoSail or not Config.TargetIsland then return end
-    
-    local targetPos = GetIslandPosition(Config.TargetIsland)
-    if not targetPos then return end
-    
-    if CurrentBoat then
-        -- Calculate direction
-        local direction = (targetPos - CurrentBoat.VehicleSeat.Position).Unit
-        local forward = CurrentBoat.VehicleSeat.CFrame.LookVector
-        
-        -- Calculate angle between current direction and target direction
-        local angle = math.atan2(direction.X, direction.Z) - math.atan2(forward.X, forward.Z)
-        angle = (angle + math.pi) % (2 * math.pi) - math.pi
-        
-        -- Steer boat
-        if angle > 0.1 then
-            VirtualInputManager:SendKeyEvent(true, "A", false, game)
-            VirtualInputManager:SendKeyEvent(false, "A", false, game)
-        elseif angle < -0.1 then
-            VirtualInputManager:SendKeyEvent(true, "D", false, game)
-            VirtualInputManager:SendKeyEvent(false, "D", false, game)
-        end
-        
-        -- Move forward
-        VirtualInputManager:SendKeyEvent(true, "W", false, game)
-    else
-        -- Move to target position on foot
-        Humanoid:MoveTo(targetPos)
-    end
-end
-
-function CheckServerHop()
-    if not Config.AutoServerHop or tick() - LastServerHop < Config.HopDelay then return end
-    
-    local shouldHop = false
-    
-    -- Check player count
-    if Config.LowPlayerServer and #Players:GetPlayers() > Config.MaxPlayers then
-        shouldHop = true
-    end
-    
-    -- Check for targets
-    if Config.AutoFarmSeaBeasts and #Workspace:GetChildren("SeaBeast") == 0 then
-        shouldHop = true
-    end
-    
-    if shouldHop then
-        ServerHop()
-        LastServerHop = tick()
-    end
-end
-
-function ServerHop()
+    -- Server hop logic
     local servers = {}
-    local success, result = pcall(function()
-        return game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100"))
-    end)
+    local req = syn.request({
+        Url = "https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100",
+        Method = "GET"
+    })
     
-    if success and result and result.data then
-        for _, server in pairs(result.data) do
-            if server.playing and (not Config.LowPlayerServer or server.playing < Config.MaxPlayers) and server.id ~= game.JobId then
+    if req.StatusCode == 200 then
+        local body = HttpService:JSONDecode(req.Body)
+        for _, server in pairs(body.data) do
+            if server.playing < config.maxPlayersForHop and server.id ~= game.JobId then
                 table.insert(servers, server.id)
             end
         end
     end
     
     if #servers > 0 then
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], Player)
+        local randomServer = servers[math.random(1, #servers)]
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServer, LocalPlayer)
     else
-        TeleportService:Teleport(game.PlaceId, Player)
+        TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end
 end
 
--- Main Loop
+-- Main loop
+local RunService = game:GetService("RunService")
 RunService.Heartbeat:Connect(function()
-    -- Update character references
-    if not Character or not Character.Parent then
-        Character = Player.Character or Player.CharacterAdded:Wait()
-        HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-        Humanoid = Character:WaitForChild("Humanoid")
+    if not config.autoFarm then return end
+    
+    -- Auto Boat
+    if config.autoBoat and not currentBoat then
+        currentBoat = getBoat()
+        if not currentBoat then
+            if buyBoat() then
+                wait(3) -- Wait for boat to spawn
+                currentBoat = getBoat()
+            end
+        else
+            boardBoat(currentBoat)
+        end
     end
     
-    -- Auto Boat Logic
-    if Config.AutoBoat then
-        if not CurrentBoat or not CurrentBoat.Parent then
-            local boat = GetNearestBoat()
-            if boat then
-                BoardBoat(boat)
-            else
-                BuyBoat()
+    -- Auto Sail
+    if config.autoSail and currentBoat then
+        currentIsland = getNearestIsland()
+        if currentIsland then
+            local boatSeat = currentBoat:FindFirstChild("VehicleSeat")
+            if boatSeat then
+                local targetPosition = currentIsland.HumanoidRootPart.Position
+                Humanoid:MoveTo(targetPosition)
             end
         end
     end
     
-    -- Auto Sail Logic
-    SailToIsland()
+    -- Scan for targets and items
+    scanForFruits()
+    scanForChests()
     
-    -- Combat Logic
-    DodgeAttack()
-    
-    local target, targetType = GetNearestEnemy()
-    if target then
-        AttackTarget(target, targetType)
+    -- Priority: Sea Beasts
+    if config.autoSeaBeast then
+        currentTarget = getClosestEnemy()
+        if currentTarget then
+            attackEnemy(currentTarget)
+            if config.dodgeEnabled then
+                dodgeAttack()
+            end
+            return -- Focus on combat first
+        end
     end
     
-    -- Server Management
-    CheckServerHop()
+    -- Collect fruits
+    if config.autoFruit and #fruitWaypoints > 0 then
+        if collectNearestFruit() then return end
+    end
+    
+    -- Collect chests
+    if config.autoChest and #chestWaypoints > 0 then
+        if collectNearestChest() then return end
+    end
+    
+    -- Server hop if conditions met
+    if shouldServerHop() then
+        serverHop()
+    end
 end)
 
 -- Auto Reconnect
-game:GetService("Players").LocalPlayer.OnTeleport:Connect(function(State)
-    if State == Enum.TeleportState.Started and Config.AutoReconnect then
-        local script = [[
-            wait(5)
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/Avka24/bloxfruit/refs/heads/main/auto%20sea.lua"))()
+game:GetService("Players").LocalPlayer.OnTeleport:Connect(function(state)
+    if state == Enum.TeleportState.Started then
+        local code = [[
+            loadstring(game:HttpGet('https://raw.githubusercontent.com/your-repo/your-script.lua'))()
         ]]
-        queue_on_teleport(script)
+        local queueonteleport = (syn and syn.queue_on_teleport) or queue_on_teleport or (fluxus and fluxus.queue_on_teleport)
+        if queueonteleport then
+            queueonteleport(code)
+        end
     end
 end)
 
 -- Initialize
-Rayfield:LoadConfiguration()
 Rayfield:Notify({
-    Title = "Script Loaded",
-    Content = "Blox Fruits Auto Farm Laut is now running!",
+    Title = "Auto Farm Laut",
+    Content = "Script berhasil diaktifkan!",
     Duration = 6.5,
-    Image = nil,
-    Actions = {
-        Ignore = {
-            Name = "Okay",
-            Callback = function() end
-        },
-    },
+    Image = 4483362458,
 })
