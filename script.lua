@@ -577,7 +577,7 @@ end)
 game:GetService("Players").LocalPlayer.OnTeleport:Connect(function(state)
     if state == Enum.TeleportState.Started then
         local code = [[
-            loadstring(game:HttpGet('https://raw.githubusercontent.com/your-repo/your-script.lua'))()
+            loadstring(game:HttpGet('https://raw.githubusercontent.com/Avka24/bloxfruit/refs/heads/main/script.lua'))()
         ]]
         local queueonteleport = (syn and syn.queue_on_teleport) or queue_on_teleport or (fluxus and fluxus.queue_on_teleport)
         if queueonteleport then
